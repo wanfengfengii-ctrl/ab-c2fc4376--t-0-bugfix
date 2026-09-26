@@ -10,6 +10,7 @@ import {
   ratToNumber,
   hpToNumber,
   cameraAtTime,
+  formatNum,
 } from './geometry.js';
 import { validatePlan, sortedKeyframes, LIMITS } from './state.js';
 
@@ -56,7 +57,11 @@ const kfLabels = () => new Map(kfsSorted().map((k, i) => [k.id, `K${i + 1}`]));
 const markerLabels = () => new Map(state.markers.map((m, i) => [m.id, `M${i + 1}`]));
 const rectLabels = () => new Map(state.rects.map((r, i) => [r.id, `R${i + 1}`]));
 
-const fmt = (x) => String(Math.round(x * 10000) / 10000);
+/**
+ * 自适应精度展示（实现见 geometry.js 的 formatNum）：常规数值保留至多 4 位小数；
+ * 亚微秒级非零值自动加位，保证非零结果不会被格式化成 0（如 0.0000001 → "0.0000001"）。
+ */
+const fmt = formatNum;
 const fmtR = (r) => fmt(ratToNumber(r));
 const fmtP = (p) => `(${fmt(p.x)}, ${fmt(p.y)})`;
 
@@ -123,7 +128,7 @@ function renderPanel() {
           k.id,
           kL.get(k.id),
           [
-            ['t', k.t, '0.1'],
+            ['t', k.t, 'any'],
             ['x', k.x, '1'],
             ['y', k.y, '1'],
           ],
@@ -535,13 +540,16 @@ function updateScrubRange() {
   if (kfs.length >= 2) {
     scrub.min = kfs[0].t;
     scrub.max = kfs[kfs.length - 1].t;
-    scrub.step = Math.max((kfs[kfs.length - 1].t - kfs[0].t) / 2000, 0.001);
+    // 全程至少细分为 2000 格；下限 1e-12 与几何核心分辨率对齐，
+    // 使亚微秒时间轴（如跨度 0.0000004）也能精确定位到首个遮挡时刻。
+    const span = kfs[kfs.length - 1].t - kfs[0].t;
+    scrub.step = span > 0 ? String(Math.max(span / 2000, 1e-12)) : 'any';
     if (viewTime != null) scrub.value = viewTime;
   }
 }
 
 function updateTimeLabel() {
-  $('#time-label').textContent = viewTime == null ? 't = —' : `t = ${Number(viewTime).toFixed(2)}`;
+  $('#time-label').textContent = viewTime == null ? 't = —' : `t = ${fmt(viewTime)}`;
   if (viewTime != null) scrub.value = viewTime;
 }
 

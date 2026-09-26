@@ -13,9 +13,14 @@
  *
  * 所有坐标/时间在内部按 SCALE 缩放为整数，配合 BigInt 有理数运算，
  * 判定过程不引入任何浮点误差（浮点仅用于最终展示）。
+ * SCALE 取 1e12：内部分辨率达 1e-12（时间为皮秒级、坐标为 1e-6 像素的
+ * 百万分之一），足以保留亚微秒级严格递增时间轴的可区分性，
+ * 例如 t=0 与 t=0.0000004 不会被截断成同一时刻。
  */
 
-export const SCALE = 1_000_000n;
+export const SCALE = 1_000_000_000_000n;
+/** SCALE 的浮点形式，仅在录入取整时使用一次。 */
+const SCALE_F = Number(SCALE);
 
 /* ---------------- 有理数（BigInt 分子/分母，规范化） ---------------- */
 
@@ -47,7 +52,7 @@ export function rat(n, d = 1n) {
 
 /** 十进制 number → 精确有理数（按 SCALE 缩放取整）。 */
 export function ratFromNumber(x) {
-  return rat(BigInt(Math.round(x * 1_000_000)), SCALE);
+  return rat(BigInt(Math.round(x * SCALE_F)), SCALE);
 }
 
 export function ratToNumber(r) {
@@ -74,24 +79,24 @@ export function hp(x, y, w = 1n) {
 
 /** 浮点坐标 → 齐次点（缩放整数，W=1）。 */
 export function hpFromNumber(px, py) {
-  return hp(BigInt(Math.round(px * 1_000_000)), BigInt(Math.round(py * 1_000_000)), 1n);
+  return hp(BigInt(Math.round(px * SCALE_F)), BigInt(Math.round(py * SCALE_F)), 1n);
 }
 
 /** 齐次点 → 浮点坐标（仅供展示）。 */
 export function hpToNumber(p) {
-  return { x: Number(p.x) / Number(p.w) / 1e6, y: Number(p.y) / Number(p.w) / 1e6 };
+  return { x: Number(p.x) / Number(p.w) / SCALE_F, y: Number(p.y) / Number(p.w) / SCALE_F };
 }
 
 /* ---------------- 轴对齐矩形（缩放整数边界） ---------------- */
 
 export function rectFromNumber(x, y, w, h) {
-  const xmin = BigInt(Math.round(x * 1_000_000));
-  const ymin = BigInt(Math.round(y * 1_000_000));
+  const xmin = BigInt(Math.round(x * SCALE_F));
+  const ymin = BigInt(Math.round(y * SCALE_F));
   return {
     xmin,
     ymin,
-    xmax: xmin + BigInt(Math.round(w * 1_000_000)),
-    ymax: ymin + BigInt(Math.round(h * 1_000_000)),
+    xmax: xmin + BigInt(Math.round(w * SCALE_F)),
+    ymax: ymin + BigInt(Math.round(h * SCALE_F)),
   };
 }
 
@@ -359,4 +364,22 @@ export function cameraAtTime(kfsSorted, t) {
     }
   }
   return { x: last.x, y: last.y, segIndex: kfsSorted.length - 2 };
+}
+
+/**
+ * 浮点数值展示格式化（仅供 UI）：
+ * 常规数值保留至多 4 位小数；对绝对值小于 1e-4 的非零数自动提高小数位数
+ * （最多 12 位，与 SCALE 的 1e-12 分辨率对齐），确保亚微秒级非零结果
+ * （如 0.0000001）以用户可复核的非零精度展示，而不会被截断成 0。
+ */
+export function formatNum(x) {
+  const ax = Math.abs(x);
+  let digits = 4;
+  if (ax !== 0 && ax < 1e-4) {
+    const lead = Math.floor(Math.log10(ax));
+    digits = Math.min(12, -lead + 3);
+  }
+  let s = Number(x).toFixed(digits);
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s;
 }

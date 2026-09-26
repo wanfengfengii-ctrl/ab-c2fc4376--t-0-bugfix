@@ -6,7 +6,7 @@
  * 任一断言失败 → 退出码 1。
  */
 import assert from 'node:assert/strict';
-import { analyzePlan, rat, rCmp, hpToNumber } from '../src/geometry.js';
+import { analyzePlan, rat, rCmp, hpToNumber, ratToNumber, formatNum } from '../src/geometry.js';
 
 let failures = 0;
 function check(name, fn) {
@@ -112,6 +112,40 @@ check('场景D：多段方案的全局最早遮挡定位', () => {
   assert.equal(res.segments[0].markers[1].rects.length, 0, 'M2 在段1 应安全');
   assert.equal(res.segments[1].markers[0].rects.length, 0, 'M1 在段2 应安全');
   assert.equal(rCmp(res.earliest.t, rat(5n, 2n)), 0, '全局最早遮挡应为 t=2.5');
+});
+
+// 场景 E（亚微秒回归）：严格递增时间轴 t=0 → t=0.0000004，相机 (0,0)→(10,0)。
+// 标记 (5,10) 与 (5,-10)，矩形 [4,6]×[4,6]。
+// 解析解：视线首次触及矩形发生在段参数 u=1/4（掠过顶点 (4,6)），
+// 故正确的首个遮挡时刻 t = 0.25 × 0.0000004 = 0.0000001，相机位于 (2.5, 0)。
+// 修复前内部按 1e6 缩放，0.0000004 被截断为 0，首个遮挡被错误报为 t=0；
+// 展示也只保留 4 位小数，非零结果显示成 0。
+check('场景E：亚微秒时间轴的首个遮挡精确为 t=0.0000001 且非零展示', () => {
+  const res = analyzePlan({
+    keyframes: [
+      { t: 0, x: 0, y: 0 },
+      { t: 0.0000004, x: 10, y: 0 },
+    ],
+    markers: [
+      { x: 5, y: 10 },
+      { x: 5, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  assert.equal(res.segments.length, 1);
+  const ivs = res.segments[0].markers[0].rects; // M1 被遮挡
+  assert.equal(ivs.length, 1, '应恰好有一个遮挡区间');
+  assert.equal(rCmp(ivs[0].uStart, rat(1n, 4n)), 0, 'uStart 应精确为 1/4');
+  assert.equal(rCmp(ivs[0].tStart, rat(1n, 10_000_000n)), 0, 'tStart 应精确为 0.0000001');
+  assert.equal(rCmp(ivs[0].tEnd, rat(3n, 10_000_000n)), 0, 'tEnd 应精确为 0.0000003');
+  assert.equal(res.segments[0].markers[1].rects.length, 0, 'M2(5,-10) 应全程安全');
+  assert.ok(res.earliest, '应给出最早遮挡证据');
+  assert.equal(rCmp(res.earliest.t, rat(1n, 10_000_000n)), 0, '最早遮挡应为非零的 t=0.0000001');
+  const tNum = ratToNumber(res.earliest.t);
+  assert.ok(tNum > 0, `最早遮挡时刻必须为正，实际 ${tNum}`);
+  assert.equal(formatNum(tNum), '0.0000001', '展示必须保留非零精度，不能显示为 0');
+  const cam = hpToNumber(res.earliest.cam);
+  assert.ok(Math.abs(cam.x - 2.5) < 1e-9 && Math.abs(cam.y) < 1e-9, '最早遮挡相机位置应为 (2.5, 0)');
 });
 
 if (failures > 0) {

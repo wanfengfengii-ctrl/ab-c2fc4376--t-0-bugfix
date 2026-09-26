@@ -123,3 +123,60 @@ test('重置示例回到未校核状态', () => {
   assert.ok(getEl('#results').innerHTML.includes('尚未校核'));
   assert.equal(getEl('#banner').className, 'banner hidden');
 });
+
+test('亚微秒方案：首个遮挡报告非零 t=0.0000001 并以非零精度展示', () => {
+  const aside = getEl('aside');
+  const clickBtn = (dataset) =>
+    aside.fire('click', { target: { dataset, closest: () => ({ dataset }) } });
+  const setField = (kind, id, field, value) =>
+    aside.fire('input', { target: { dataset: { kind, id, field }, value } });
+  const idsIn = (sel) =>
+    [...new Set([...getEl(sel).innerHTML.matchAll(/data-id="(\d+)"/g)].map((m) => m[1]))];
+
+  // 默认示例为 3 关键帧 / 3 标记 / 2 矩形，删到验收场景所需的 2 / 2 / 1
+  const kfIds = idsIn('#panel-keyframes');
+  clickBtn({ action: 'del', kind: 'keyframe', id: kfIds[2] });
+  const mkIds = idsIn('#panel-markers');
+  clickBtn({ action: 'del', kind: 'marker', id: mkIds[2] });
+  const rcIds = idsIn('#panel-rects');
+  clickBtn({ action: 'del', kind: 'rect', id: rcIds[1] });
+
+  // 关键帧：t=0 (0,0) → t=0.0000004 (10,0)
+  const kf2 = idsIn('#panel-keyframes');
+  setField('keyframe', kf2[0], 't', '0');
+  setField('keyframe', kf2[0], 'x', '0');
+  setField('keyframe', kf2[0], 'y', '0');
+  setField('keyframe', kf2[1], 't', '0.0000004');
+  setField('keyframe', kf2[1], 'x', '10');
+  setField('keyframe', kf2[1], 'y', '0');
+
+  // 标记 (5,10) 与 (5,-10)
+  const mk2 = idsIn('#panel-markers');
+  setField('marker', mk2[0], 'x', '5');
+  setField('marker', mk2[0], 'y', '10');
+  setField('marker', mk2[1], 'x', '5');
+  setField('marker', mk2[1], 'y', '-10');
+
+  // 保护矩形 x=4 y=4 w=2 h=2
+  const rc2 = idsIn('#panel-rects');
+  setField('rect', rc2[0], 'x', '4');
+  setField('rect', rc2[0], 'y', '4');
+  setField('rect', rc2[0], 'w', '2');
+  setField('rect', rc2[0], 'h', '2');
+
+  fire('#btn-verify', 'click');
+
+  const banner = getEl('#banner');
+  assert.equal(banner.className, 'banner bad');
+  assert.ok(banner.textContent.includes('0.0000001'), `横幅应显示非零时刻：${banner.textContent}`);
+  assert.ok(!/t = 0(?!\.)|t = 0$/.test(banner.textContent));
+  const results = getEl('#results').innerHTML;
+  assert.ok(results.includes('首个遮挡证据'));
+  assert.ok(results.includes('0.0000001'), '结果区应以非零精度展示首个遮挡时刻');
+
+  // 时间轴已精确定位到 t=0.0000001，标签非零展示，步长足以区分该时刻
+  const scrub = getEl('#scrub');
+  assert.ok(Math.abs(parseFloat(scrub.value) - 1e-7) < 1e-12, `scrub 定位异常：${scrub.value}`);
+  assert.ok(parseFloat(scrub.step) < 1e-7, `scrub 步长过粗：${scrub.step}`);
+  assert.equal(getEl('#time-label').textContent, 't = 0.0000001');
+});

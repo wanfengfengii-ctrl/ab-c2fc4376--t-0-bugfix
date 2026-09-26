@@ -9,6 +9,7 @@ import {
   ratFromNumber,
   hp,
   hpFromNumber,
+  hpToNumber,
   rectFromNumber,
   pointInRect,
   segmentsIntersect,
@@ -16,6 +17,8 @@ import {
   occlusionIntervals,
   analyzePlan,
   cameraAtTime,
+  formatNum,
+  SCALE,
 } from '../src/geometry.js';
 
 /* ---------------- 有理数 ---------------- */
@@ -167,10 +170,10 @@ test('analyzePlan：最早遮挡证据与时间映射', () => {
   assert.equal(rCmp(rec.tEnd, rat(15n, 2n)), 0); // t = 7.5
   assert.ok(res.earliest);
   assert.equal(rCmp(res.earliest.t, rat(5n, 2n)), 0);
-  const cam = res.earliest.cam;
-  // 相机位置 (2.5, 0)
-  assert.equal(cam.x * 2n, cam.w * 5_000_000n);
-  assert.equal(cam.y, 0n);
+  // 相机位置 (2.5, 0)（经展示转换断言，不依赖内部缩放常数 SCALE）
+  const cam = hpToNumber(res.earliest.cam);
+  assert.ok(Math.abs(cam.x - 2.5) < 1e-9);
+  assert.ok(Math.abs(cam.y) < 1e-9);
 });
 
 test('analyzePlan：多段多标记多矩形，取全局最早', () => {
@@ -206,4 +209,51 @@ test('cameraAtTime：浮点插值与钳制', () => {
   assert.deepEqual(cameraAtTime(kfs, 15), { x: 10, y: 5, segIndex: 1 });
   assert.deepEqual(cameraAtTime(kfs, -1), { x: 0, y: 0, segIndex: 0 });
   assert.deepEqual(cameraAtTime(kfs, 99), { x: 10, y: 10, segIndex: 1 });
+});
+
+/* ---------------- 亚微秒时间轴（严格递增可区分性回归） ---------------- */
+
+test('亚微秒时间轴：t=0 与 t=0.0000004 不被截断，最早遮挡精确为 t=0.0000001', () => {
+  assert.equal(SCALE, 1_000_000_000_000n);
+  // 修复前 SCALE=1e6 时 0.0000004 被取整为 0，两帧塌缩为同一时刻。
+  assert.ok(rCmp(ratFromNumber(0.0000004), ratFromNumber(0)) > 0);
+
+  const res = analyzePlan({
+    keyframes: [
+      { t: 0, x: 0, y: 0 },
+      { t: 0.0000004, x: 10, y: 0 },
+    ],
+    markers: [
+      { x: 5, y: 10 },
+      { x: 5, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  assert.equal(res.segments.length, 1);
+  // M1(5,10)：段参数 u∈[1/4,3/4] 时视线扫过矩形；M2(5,-10) 全程安全。
+  const ivs = res.segments[0].markers[0].rects;
+  assert.equal(ivs.length, 1);
+  assert.equal(rCmp(ivs[0].uStart, rat(1n, 4n)), 0);
+  assert.equal(rCmp(ivs[0].uEnd, rat(3n, 4n)), 0);
+  // dt = 0.0000004 = 1/2_500_000，故 t∈[1e-7, 3e-7]
+  assert.equal(rCmp(ivs[0].tStart, rat(1n, 10_000_000n)), 0);
+  assert.equal(rCmp(ivs[0].tEnd, rat(3n, 10_000_000n)), 0);
+  assert.equal(res.segments[0].markers[1].rects.length, 0);
+  // 全局最早遮挡必须是非零的 t=0.0000001，相机位于 (2.5, 0)
+  assert.ok(res.earliest);
+  assert.equal(rCmp(res.earliest.t, rat(1n, 10_000_000n)), 0);
+  assert.ok(rCmp(res.earliest.t, ratFromNumber(0.0000004)) < 0);
+  const cam = hpToNumber(res.earliest.cam);
+  assert.ok(Math.abs(cam.x - 2.5) < 1e-9 && Math.abs(cam.y) < 1e-9);
+});
+
+test('formatNum：非零亚微秒结果必须以非零精度展示，不得显示为 0', () => {
+  assert.equal(formatNum(0), '0');
+  assert.equal(formatNum(0.0000001), '0.0000001');
+  assert.equal(formatNum(0.0000004), '0.0000004');
+  assert.equal(formatNum(-0.0000001), '-0.0000001');
+  assert.equal(formatNum(0.0000000005), '0.0000000005');
+  // 常规数值仍保持简洁的至多 4 位小数
+  assert.equal(formatNum(2.5), '2.5');
+  assert.equal(formatNum(1.4444444), '1.4444');
 });
