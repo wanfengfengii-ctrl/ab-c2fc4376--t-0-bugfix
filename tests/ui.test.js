@@ -118,6 +118,55 @@ test('拖动画布实体后自动复核', () => {
   assert.ok(getEl('#results').innerHTML.includes('首个遮挡证据'));
 });
 
+test('亚微秒方案录入：首个遮挡证据以非零精度展示 t=0.0000001（不显示为 0）', () => {
+  const aside = getEl('aside');
+  const rowIds = (sel, kind) => [
+    ...new Set(
+      [...getEl(sel).innerHTML.matchAll(new RegExp(`data-kind="${kind}" data-id="(\\d+)"`, 'g'))].map(
+        (m) => m[1],
+      ),
+    ),
+  ];
+  const setField = (kind, id, field, value) =>
+    aside.fire('input', { target: { dataset: { kind, id, field }, value: String(value) } } );
+  const del = (kind, id) =>
+    aside.fire('click', {
+      target: { closest: (s) => (s === 'button' ? { dataset: { action: 'del', kind, id } } : null) },
+    });
+
+  // 默认示例有 3 关键帧 / 3 标记 / 2 矩形，收敛为验收方案：
+  // K1 t=0 (0,0)，K2 t=0.0000004 (10,0)；标记 (5,10)、(5,-10)；矩形 x=4,y=4,w=2,h=2。
+  const kfIds = rowIds('#panel-keyframes', 'keyframe');
+  const mIds = rowIds('#panel-markers', 'marker');
+  const rIds = rowIds('#panel-rects', 'rect');
+  del('keyframe', kfIds[2]);
+  del('marker', mIds[2]);
+  del('rect', rIds[1]);
+  for (const [f, v] of [['x', 4], ['y', 4], ['w', 2], ['h', 2]]) setField('rect', rIds[0], f, v);
+  for (const [f, v] of [['t', 0], ['x', 0], ['y', 0]]) setField('keyframe', kfIds[0], f, v);
+  for (const [f, v] of [['t', 0.0000004], ['x', 10], ['y', 0]]) setField('keyframe', kfIds[1], f, v);
+  for (const [f, v] of [['x', 5], ['y', 10]]) setField('marker', mIds[0], f, v);
+  for (const [f, v] of [['x', 5], ['y', -10]]) setField('marker', mIds[1], f, v);
+
+  fire('#btn-verify', 'click');
+
+  // 方案合法且判为不可执行
+  assert.equal(getEl('#banner').className, 'banner bad');
+  const results = getEl('#results').innerHTML;
+  assert.ok(results.includes('首个遮挡证据'));
+  // 非零精度展示：横幅、证据列表、画布时间标签均为 0.0000001，而不是 0
+  assert.ok(
+    getEl('#banner').textContent.includes('t = 0.0000001'),
+    `横幅应展示非零首个遮挡时刻，实际：${getEl('#banner').textContent}`,
+  );
+  assert.ok(results.includes('t = 0.0000001'), '证据列表应展示 t = 0.0000001');
+  assert.ok(results.includes('(2.5, 0)'), '首个遮挡相机位置应为 (2.5, 0)');
+  assert.equal(getEl('#time-label').textContent, 't = 0.0000001');
+  // 时间轴已定位到 1e-7，且步长为亚微秒量级（可拖动复核）
+  assert.ok(Math.abs(parseFloat(getEl('#scrub').value) - 0.0000001) < 1e-12);
+  assert.ok(parseFloat(getEl('#scrub').step) < 0.001);
+});
+
 test('重置示例回到未校核状态', () => {
   fire('#btn-reset', 'click');
   assert.ok(getEl('#results').innerHTML.includes('尚未校核'));

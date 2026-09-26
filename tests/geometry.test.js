@@ -16,6 +16,7 @@ import {
   occlusionIntervals,
   analyzePlan,
   cameraAtTime,
+  ratToNumber,
 } from '../src/geometry.js';
 
 /* ---------------- 有理数 ---------------- */
@@ -27,6 +28,15 @@ test('有理数规范化与四则运算', () => {
   assert.equal(rCmp(rMul(rat(2n, 3n), rat(9n, 4n)), rat(3n, 2n)), 0);
   assert.equal(rCmp(rMid(rat(0n), rat(1n)), rat(1n, 2n)), 0);
   assert.equal(rCmp(ratFromNumber(0.25), rat(1n, 4n)), 0);
+});
+
+test('亚微秒时间：严格递增的小数时间保持可区分性，不被量化为 0', () => {
+  assert.equal(rCmp(ratFromNumber(0.0000001), rat(1n, 10_000_000n)), 0);
+  assert.equal(rCmp(ratFromNumber(0.0000004), rat(4n, 10_000_000n)), 0);
+  assert.ok(rCmp(ratFromNumber(0.0000001), rat(0n)) > 0);
+  assert.ok(rCmp(ratFromNumber(0.0000004), ratFromNumber(0.0000001)) > 0);
+  // 常规十进制值仍然精确
+  assert.equal(rCmp(ratFromNumber(0.1), rat(1n, 10n)), 0);
 });
 
 /* ---------------- 线段相交（含相切） ---------------- */
@@ -194,6 +204,39 @@ test('analyzePlan：多段多标记多矩形，取全局最早', () => {
   // 全局最早应来自段1（任何段2 的遮挡 t ≥ 10）
   assert.ok(res.earliest);
   assert.ok(rCmp(res.earliest.t, rat(10n)) < 0);
+});
+
+test('亚微秒时间轴：t=0 与 t=4e-7 两个关键帧的首个遮挡精确发生在 t=1e-7', () => {
+  // 匀速段 (0,0)→(10,0)，标记 (5,±10)，矩形 [4,6]×[4,6]：
+  // 几何与场景A相同（uStart=1/4），故最早遮挡 t = 4e-7·1/4 = 1e-7，而非 0。
+  const res = analyzePlan({
+    keyframes: [
+      { t: 0, x: 0, y: 0 },
+      { t: 0.0000004, x: 10, y: 0 },
+    ],
+    markers: [
+      { x: 5, y: 10 },
+      { x: 5, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  assert.equal(res.segments.length, 1);
+  const m1 = res.segments[0].markers[0].rects;
+  const m2 = res.segments[0].markers[1].rects;
+  assert.equal(m1.length, 1);
+  assert.equal(m2.length, 0); // (5,-10) 全段安全
+  assert.equal(rCmp(m1[0].uStart, rat(1n, 4n)), 0);
+  assert.equal(rCmp(m1[0].uEnd, rat(3n, 4n)), 0);
+  assert.equal(rCmp(m1[0].tStart, rat(1n, 10_000_000n)), 0); // t = 0.0000001
+  assert.equal(rCmp(m1[0].tEnd, rat(3n, 10_000_000n)), 0); // t = 0.0000003
+  assert.ok(res.earliest);
+  assert.equal(rCmp(res.earliest.t, rat(1n, 10_000_000n)), 0);
+  assert.ok(rCmp(res.earliest.t, rat(0n)) > 0);
+  // 首个遮挡证据的相机位置为 (2.5, 0)（段参数 1/4 处，齐次分母为 u 的分母 4）
+  const cam = res.earliest.cam;
+  assert.equal(cam.x, cam.w * 2_500_000n);
+  assert.equal(cam.y, 0n);
+  assert.equal(ratToNumber(res.earliest.t), 0.0000001);
 });
 
 test('cameraAtTime：浮点插值与钳制', () => {

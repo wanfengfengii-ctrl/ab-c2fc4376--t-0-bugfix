@@ -49,6 +49,17 @@ test('关键帧时间必须严格递增（重复时间报错）', () => {
   assert.ok(v.errors.some((e) => e.includes('严格递增')));
 });
 
+test('亚微秒级严格递增的关键帧时间仍合法', () => {
+  const p = basePlan();
+  p.keyframes = [
+    { t: 0, x: 0, y: 0 },
+    { t: 0.0000004, x: 10, y: 0 },
+  ];
+  const v = validatePlan(p);
+  assert.equal(v.ok, true, '0 与 0.0000004 严格递增，应通过校核');
+  assert.deepEqual(v.errors, []);
+});
+
 test('标记点落在保护矩形内（含边界）报错', () => {
   const p = basePlan();
   p.markers[0] = { x: 50, y: 30 }; // 矩形 [40,60]×[20,40] 内

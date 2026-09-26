@@ -11,8 +11,9 @@
  * 在每个开区间中点精确判定一次即可还原整个遮挡集合。
  * 输出为精确的遮挡区间集（区间退化为一点时即"瞬时相切"）。
  *
- * 所有坐标/时间在内部按 SCALE 缩放为整数，配合 BigInt 有理数运算，
- * 判定过程不引入任何浮点误差（浮点仅用于最终展示）。
+ * 坐标在内部按 SCALE 缩放为整数；时间直接按其十进制展开存为精确有理数
+ * （不做 1e6 倍取整，故亚微秒级严格递增时间仍可区分）。
+ * 配合 BigInt 有理数运算，判定过程不引入任何浮点误差（浮点仅用于最终展示）。
  */
 
 export const SCALE = 1_000_000n;
@@ -45,9 +46,49 @@ export function rat(n, d = 1n) {
   return { n: n / g, d: d / g };
 }
 
-/** 十进制 number → 精确有理数（按 SCALE 缩放取整）。 */
+/**
+ * 解析有限 number 的十进制展开（Number.prototype.toString，含 4e-7 等科学记数法）
+ * 为 { n, d }，其中 d = 10^k（k ≥ 0，尚未约分）。
+ * 直接对十进制数字串移位取数，不做 x·10^k 的浮点乘法，
+ * 因而亚微秒数值（如 0.0000004）不会在乘法/取整中丢失为 0。
+ */
+function decimalParts(x) {
+  if (!Number.isFinite(x)) throw new Error('expected a finite number');
+  if (x === 0) return { n: 0n, d: 1n };
+  let s = x.toString();
+  let sign = 1n;
+  if (s.startsWith('-')) {
+    sign = -1n;
+    s = s.slice(1);
+  }
+  let exp = 0;
+  const ePos = s.indexOf('e');
+  if (ePos >= 0) {
+    exp = Number(s.slice(ePos + 1)); // 含 "+21" 形式
+    s = s.slice(0, ePos);
+  }
+  const dot = s.indexOf('.');
+  if (dot >= 0) {
+    exp -= s.length - dot - 1;
+    s = s.slice(0, dot) + s.slice(dot + 1);
+  }
+  const digits = BigInt(s) * sign;
+  if (exp >= 0) return { n: digits * 10n ** BigInt(exp), d: 1n };
+  return { n: digits, d: 10n ** BigInt(-exp) };
+}
+
+/** 精确十进制值 p.n/p.d 乘以 SCALE 后四舍五入为缩放整数（坐标/矩形使用）。 */
+function scaledInt(x) {
+  const p = decimalParts(x);
+  const num = p.n * SCALE;
+  const half = p.d / 2n;
+  return num >= 0n ? (num + half) / p.d : -((-num + half) / p.d);
+}
+
+/** 十进制 number → 精确有理数（按其十进制展开精确约分，亚微秒值也可区分）。 */
 export function ratFromNumber(x) {
-  return rat(BigInt(Math.round(x * 1_000_000)), SCALE);
+  const p = decimalParts(x);
+  return rat(p.n, p.d);
 }
 
 export function ratToNumber(r) {
@@ -72,9 +113,9 @@ export function hp(x, y, w = 1n) {
   return { x, y, w };
 }
 
-/** 浮点坐标 → 齐次点（缩放整数，W=1）。 */
+/** 浮点坐标 → 齐次点（缩放整数，W=1）。亚微秒级时间不受此量化影响（时间走 ratFromNumber）。 */
 export function hpFromNumber(px, py) {
-  return hp(BigInt(Math.round(px * 1_000_000)), BigInt(Math.round(py * 1_000_000)), 1n);
+  return hp(scaledInt(px), scaledInt(py), 1n);
 }
 
 /** 齐次点 → 浮点坐标（仅供展示）。 */
@@ -85,13 +126,13 @@ export function hpToNumber(p) {
 /* ---------------- 轴对齐矩形（缩放整数边界） ---------------- */
 
 export function rectFromNumber(x, y, w, h) {
-  const xmin = BigInt(Math.round(x * 1_000_000));
-  const ymin = BigInt(Math.round(y * 1_000_000));
+  const xmin = scaledInt(x);
+  const ymin = scaledInt(y);
   return {
     xmin,
     ymin,
-    xmax: xmin + BigInt(Math.round(w * 1_000_000)),
-    ymax: ymin + BigInt(Math.round(h * 1_000_000)),
+    xmax: xmin + scaledInt(w),
+    ymax: ymin + scaledInt(h),
   };
 }
 

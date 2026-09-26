@@ -114,6 +114,34 @@ check('场景D：多段方案的全局最早遮挡定位', () => {
   assert.equal(rCmp(res.earliest.t, rat(5n, 2n)), 0, '全局最早遮挡应为 t=2.5');
 });
 
+// 场景 E（亚微秒时间轴）：几何同场景A，但关键帧时间为 t=0 与 t=0.0000004。
+// 时间在内部为精确有理数，段参数 u=1/4 映射到 t = 4e-7·1/4 = 0.0000001。
+// 回归：修复前 0.0000004 被 1e6 倍取整量化为 0，首个遮挡证据错误地显示为 t=0。
+check('场景E：亚微秒严格递增时间的首个遮挡精确为 t=0.0000001（非 0）', () => {
+  const res = analyzePlan({
+    keyframes: [
+      { t: 0, x: 0, y: 0 },
+      { t: 0.0000004, x: 10, y: 0 },
+    ],
+    markers: [
+      { x: 5, y: 10 },
+      { x: 5, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  const ivs = res.segments[0].markers[0].rects;
+  assert.equal(ivs.length, 1, '应恰好有一个遮挡区间');
+  assert.equal(rCmp(ivs[0].uStart, rat(1n, 4n)), 0, 'uStart 应精确为 1/4');
+  assert.equal(rCmp(ivs[0].tStart, rat(1n, 10_000_000n)), 0, 'tStart 应精确为 0.0000001');
+  assert.equal(rCmp(ivs[0].tEnd, rat(3n, 10_000_000n)), 0, 'tEnd 应精确为 0.0000003');
+  assert.equal(res.segments[0].markers[1].rects.length, 0, 'M2 应全段安全');
+  assert.ok(res.earliest, '应给出最早遮挡证据');
+  assert.equal(rCmp(res.earliest.t, rat(1n, 10_000_000n)), 0, '最早遮挡应为 t=0.0000001');
+  const cam = hpToNumber(res.earliest.cam);
+  assert.ok(Math.abs(cam.x - 2.5) < 1e-9 && Math.abs(cam.y) < 1e-9, '最早遮挡相机位置应为 (2.5, 0)');
+  assert.equal(Number(res.earliest.t.n) / Number(res.earliest.t.d), 0.0000001);
+});
+
 if (failures > 0) {
   console.error(`\n冒烟失败：${failures} 项未通过`);
   process.exit(1);

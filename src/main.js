@@ -56,7 +56,31 @@ const kfLabels = () => new Map(kfsSorted().map((k, i) => [k.id, `K${i + 1}`]));
 const markerLabels = () => new Map(state.markers.map((m, i) => [m.id, `M${i + 1}`]));
 const rectLabels = () => new Map(state.rects.map((r, i) => [r.id, `R${i + 1}`]));
 
-const fmt = (x) => String(Math.round(x * 10000) / 10000);
+/**
+ * 自适应有效数字展示：保留足以区分非零小量（含亚微秒时刻）的精度，
+ * 而不是固定小数位（固定 4 位会把 t=0.0000001 显示成 0）。
+ * toPrecision 对 |x| < 1e-6 会产生科学记数法，这里展开为定点小数
+ * （如 1e-7 → 0.0000001），保证结果是非零、可逐位复核的展示。
+ */
+const fmt = (x) => {
+  if (x === 0) return '0';
+  let s = Number(x).toPrecision(6);
+  const m = /^(-)?(\d)(?:\.(\d+))?e([+-]?\d+)$/.exec(s);
+  if (m) {
+    const digits = m[2] + (m[3] ?? '');
+    const k = digits.length;
+    const p = Number(m[4]) + 1; // 小数点应位于 digits 中第 p 个字符之后
+    s =
+      p >= k
+        ? digits + '0'.repeat(p - k)
+        : p <= 0
+          ? '0.' + '0'.repeat(-p) + digits
+          : digits.slice(0, p) + '.' + digits.slice(p);
+    if (m[1]) s = '-' + s;
+  }
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s;
+};
 const fmtR = (r) => fmt(ratToNumber(r));
 const fmtP = (p) => `(${fmt(p.x)}, ${fmt(p.y)})`;
 
@@ -533,15 +557,17 @@ const scrub = $('#scrub');
 function updateScrubRange() {
   const kfs = kfsSorted();
   if (kfs.length >= 2) {
+    const span = kfs[kfs.length - 1].t - kfs[0].t;
     scrub.min = kfs[0].t;
     scrub.max = kfs[kfs.length - 1].t;
-    scrub.step = Math.max((kfs[kfs.length - 1].t - kfs[0].t) / 2000, 0.001);
+    // 步长跟随总跨度（亚微秒方案下步长也为亚微秒），不再有 0.001 的固定下限
+    scrub.step = span > 0 ? span / 2000 : 0.001;
     if (viewTime != null) scrub.value = viewTime;
   }
 }
 
 function updateTimeLabel() {
-  $('#time-label').textContent = viewTime == null ? 't = —' : `t = ${Number(viewTime).toFixed(2)}`;
+  $('#time-label').textContent = viewTime == null ? 't = —' : `t = ${fmt(viewTime)}`;
   if (viewTime != null) scrub.value = viewTime;
 }
 
